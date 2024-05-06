@@ -98,9 +98,9 @@ def generate_launch_description():
     # )
     return LaunchDescription([
         launch_camera,
-        transport_compress
-        # lidar_params_declare,
-        #lidar_node,
+        transport_compress,
+        lidar_params_declare,
+        lidar_node,
         # imu_tf2_node,
         # lidar_tf2_node,
         # imu_params_declare,
