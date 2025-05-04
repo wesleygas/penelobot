@@ -20,17 +20,23 @@ def generate_launch_description():
     package_name='penelobot'
 
     rsp = IncludeLaunchDescription(
-                PythonLaunchDescriptionSource([os.path.join(
-                    get_package_share_directory(package_name),'launch','rsp.launch.py'
-                )]), launch_arguments={'use_sim_time': 'true', 'use_ros2_control': 'false'}.items()
+                PythonLaunchDescriptionSource([
+                    os.path.join(get_package_share_directory(package_name),'launch','rsp.launch.py')
+                ]), launch_arguments={'use_sim_time': 'true', 'use_ros2_control': 'true'}.items()
     )
     
-    gazebo_params_file = os.path.join(get_package_share_directory(package_name),'config','gazebo_params.yaml')
+    joystick = IncludeLaunchDescription(
+                PythonLaunchDescriptionSource([os.path.join(
+                    get_package_share_directory(package_name),'launch','joystick.launch.py'
+                )]), launch_arguments={'use_sim_time': 'true'}.items()
+    )
+    
+    # gazebo_params_file = os.path.join(get_package_share_directory(package_name),'config','gazebo_params.yaml')
     # Include the Gazebo launch file, provided by the gazebo_ros package
     gazebo = IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([os.path.join(
                     get_package_share_directory('gazebo_ros'), 'launch', 'gazebo.launch.py'
-                )]), launch_arguments={'extra_gazebo_args': '--ros-args --params-file ' + gazebo_params_file}.items()
+                )])
              )
 
     # Run the spawner node from the gazebo_ros package. The entity name doesn't really matter if you only have a single robot.
@@ -39,7 +45,7 @@ def generate_launch_description():
                                    '-entity', "mybot"],
                         output='screen')
 
-
+    # Lembrando que o controller_manager é do ros2_control. Então a gente PRECISA habilitar ele no rsp
     diff_drive_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -57,6 +63,7 @@ def generate_launch_description():
     # Launch them all!
     return LaunchDescription([
         rsp,
+        joystick,
         gazebo,
         spawn_entity,
         diff_drive_spawner,
