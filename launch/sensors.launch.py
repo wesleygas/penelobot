@@ -2,26 +2,21 @@ import os
 from launch import LaunchDescription
 from launch_ros.actions import Node, LifecycleNode
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 from ament_index_python import get_package_share_directory
+
 
 # from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 def generate_launch_description():
+    camera_params_file = PathJoinSubstitution([FindPackageShare("penelobot"), 'config','pseye_camera_params.yaml'])
     launch_camera = Node(
-        package='ros_deep_learning',
-        executable='video_source',
-        name='jetson_video_source',
-        parameters=[{
-            "resource":"csi://0",
-            "width":0,
-            "height":0,
-            "rtsp_latency":0,
-            "loop":0
-        }],
-        remappings=[
-            ("/video_source/raw", "/camera/image_raw"),
-        ]
+        package='usb_cam',
+        executable='usb_cam_node_exe',
+        name='pseye_video_source',
+        parameters=[camera_params_file],
+        remappings=[("/image_raw", "/camera/image_raw")]
     )
 
     transport_compress = Node(
@@ -34,23 +29,15 @@ def generate_launch_description():
         ],
         arguments=['raw', 'compressed']
     )
-
-    lidar_params_declare = DeclareLaunchArgument(
-        'lidar_params_file',
-        default_value=os.path.join(
-            get_package_share_directory('ydlidar_ros2_driver'),
-            'params', 'ydlidar.yaml'
-            ),
-        description='FPath to the ROS2 parameters file to use.'
-    )
-    lidar_parameter_file = LaunchConfiguration('lidar_params_file')
+    
+    lidar_params_file = PathJoinSubstitution([FindPackageShare("penelobot"), 'config','ydlidar.yaml'])
     lidar_node = LifecycleNode(
         package='ydlidar_ros2_driver',
         executable='ydlidar_ros2_driver_node',
         name='ydlidar_ros2_driver_node',
         output='screen',
         emulate_tty=True,
-        parameters=[lidar_parameter_file],
+        parameters=[lidar_params_file],
         namespace='/',
     )
     # lidar_tf2_node = Node(
@@ -99,7 +86,7 @@ def generate_launch_description():
     return LaunchDescription([
         launch_camera,
         transport_compress,
-        lidar_params_declare,
+        # lidar_params_declare,
         lidar_node,
         # imu_tf2_node,
         # lidar_tf2_node,

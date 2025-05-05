@@ -1,22 +1,17 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import PathJoinSubstitution
 
 
 def generate_launch_description():
+    camera_params_file = PathJoinSubstitution([FindPackageShare("penelobot"), 'config','pseye_camera_params.yaml'])
     launch_camera = Node(
-        package='ros_deep_learning',
-        executable='video_source',
-        name='jetson_video_source',
-        parameters=[{
-            "resource":"csi://0",
-            "width":0,
-            "height":0,
-            "rtsp_latency":0,
-            "loop":0
-        }],
-        remappings=[
-            ("/video_source/raw", "/camera/image_raw"),
-        ]
+        package='usb_cam',
+        executable='usb_cam_node_exe',
+        name='pseye_video_source',
+        parameters=[camera_params_file],
+        remappings=[("/image_raw", "/camera/image_raw")]
     )
 
     transport_compress = Node(
