@@ -13,7 +13,8 @@ def generate_launch_description():
         parameters=[camera_params_file],
         remappings=[
             ("/image_raw", "/camera/image_raw"),
-            ("/image_raw/compressed", "/camera/compressed")
+            ("/image_raw/compressed", "/camera/compressed"),
+            ("/camera_info", "/camera/camera_info")
         ]
     )
 

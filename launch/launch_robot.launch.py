@@ -4,9 +4,11 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
-from launch.actions import RegisterEventHandler
+from launch.conditions import IfCondition
+from launch.actions import RegisterEventHandler, DeclareLaunchArgument
 from launch.event_handlers import OnProcessStart
 
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -17,6 +19,14 @@ from launch.substitutions import Command, FindExecutable, PathJoinSubstitution
 def generate_launch_description():
 
     package_name='penelobot'
+
+    # Declare the launch argument
+    launch_sensors_arg = DeclareLaunchArgument(
+        'launch_sensors',
+        default_value='false',
+        description='Set to true to launch the robot sensors'
+    )
+    launch_sensors = LaunchConfiguration('launch_sensors')
 
     rsp = IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([
@@ -51,7 +61,6 @@ def generate_launch_description():
             controller_params_file
         ]
     )
-    delayed_controller_manager = TimerAction(period=1.0, actions=[controller_manager])
 
     diff_drive_spawner = Node(
         package="controller_manager",
@@ -65,7 +74,6 @@ def generate_launch_description():
             on_start=[diff_drive_spawner],
         )
     )
-    
     
     joint_broad_spawner = Node(
         package="controller_manager",
@@ -89,12 +97,25 @@ def generate_launch_description():
         )
 
 
+    sensors_launch_include = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [FindPackageShare(package_name), 'launch', 'sensors.launch.py']
+            )
+        ),
+        launch_arguments={'use_sim_time': 'false'}.items(),
+        # This action will only be executed if the 'launch_sensors' argument is 'true'
+        condition=IfCondition(launch_sensors)
+    )
+
+
     # Launch them all!
     return LaunchDescription([
         rsp,
         controller_manager,
         twist_mux,
-        # delayed_controller_manager,
         delayed_diff_drive_spawner,
-        delayed_joint_broad_spawner
+        delayed_joint_broad_spawner,
+        launch_sensors_arg,
+        sensors_launch_include
     ])

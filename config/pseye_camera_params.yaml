@@ -1,14 +1,14 @@
 pseye_video_source:
     ros__parameters:
-      video_device: "/dev/video1"
+      video_device: "/dev/video0"
       framerate: 60.0
       io_method: "mmap"
-      frame_id: "camera"
-      pixel_format: "yuyv"  # see ros2 run usb_cam usb_cam_node_exe --ros-args -p pixel_format:="test" for list of supported formats
-      av_device_format: "YUV422P"
+      frame_id: "camera_link_optical"
+      pixel_format: "yuyv2rgb"  # see ros2 run usb_cam usb_cam_node_exe --ros-args -p pixel_format:="test" for list of supported formats
+      # av_device_format: "YUV422P"
       image_width: 640
       image_height: 480
-      camera_name: "test_camera"
+      camera_name: "pseye"
       camera_info_url: "package://penelobot/config/camera_info.yaml"
       brightness: -1
       contrast: -1

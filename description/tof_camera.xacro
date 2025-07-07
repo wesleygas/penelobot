@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- Include global properties -->
+    <xacro:include filename="global_properties.xacro" />
+
+    <!-- The joint connecting the ToF camera to the robot's base -->
+    <joint name="tof_camera_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="tof_camera_link"/>
+        <origin xyz="${0.029+tof_camera_length} 0 ${0.15015-0.05-tof_camera_height/2}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- The physical link representing the ToF camera -->
+    <link name="tof_camera_link">
+        <visual>
+            <geometry>
+                <box size="${tof_camera_length} ${tof_camera_width} ${tof_camera_height}"/>
+            </geometry>
+            <material name="orange"/> <!-- Use a different color to distinguish it -->
+        </visual>
+        <collision>
+            <geometry>
+                <box size="${tof_camera_length} ${tof_camera_width} ${tof_camera_height}"/>
+            </geometry>
+        </collision>
+        <xacro:inertial_box mass="0.020" x="${tof_camera_length}" y="${tof_camera_width}" z="${tof_camera_height}">
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+        </xacro:inertial_box>
+    </link>
+
+    <joint name="tof_camera_optical_joint" type="fixed">
+        <parent link="tof_camera_link"/>
+        <child link="tof_camera_optical_frame"/>
+        <origin xyz="0 0 0" rpy="${-pi/2} ${-pi/2} ${-pi/2}"/>
+    </joint>
+
+    <link name="tof_camera_optical_frame"/>
+
+    <gazebo reference="tof_camera_link">
+        <material>Gazebo/Orange</material>
+        <sensor name="tof_camera_sensor" type="depth">
+            <pose> 0 0 0 0 0 0</pose>
+            <visualize>false</visualize>
+            <update_rate>10</update_rate> <!-- Match the default FPS of the driver -->
+            <camera>
+                <horizontal_fov>${tof_camera_fov_deg*pi/180}</horizontal_fov>
+                <image>
+                    <!-- Corresponds to binning=1 -->
+                    <width>100</width>
+                    <height>100</height>
+                    <format>R_FLOAT32</format>
+                </image>
+                <clip>
+                    <!-- Set realistic min/max range for a ToF camera -->
+                    <near>0.1</near>
+                    <far>2.5</far>
+                </clip>
+            </camera>
+            <plugin name="tof_camera_controller" filename="libgazebo_ros_camera.so">
+                <!-- Remap the default Gazebo topics to match our driver's topics -->
+                <ros>
+                    <namespace>/tof</namespace>
+                    <remapping>image_raw:=depth</remapping>
+                    <remapping>camera_info:=depth/camera_info</remapping>
+                    <remapping>points:=cloud</remapping>
+                </ros>
+                
+                <!-- The frame where data is published -->
+                <frame_name>tof_camera_optical_frame</frame_name>
+                
+                <!-- PointCloud settings -->
+                <point_cloud_cutoff>0.1</point_cloud_cutoff>
+                <point_cloud_cutoff_max>5.0</point_cloud_cutoff_max>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+</robot>

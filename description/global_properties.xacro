@@ -4,11 +4,11 @@
     <xacro:property name="chassis_width" value="0.160"/>
     <xacro:property name="chassis_height" value="0.155"/>
     <xacro:property name="chassis_mass" value="1.5"/>
-    <xacro:property name='wheel_diameter' value='0.068'/>
+    <xacro:property name='wheel_diameter' value='0.0675'/>
     <xacro:property name="wheel_thickness" value="0.027"/>
     <xacro:property name="wheel_mass" value="0.05"/>
     <xacro:property name="wheel_offset_x" value="0.0"/>
-    <xacro:property name="wheel_offset_y" value="0.105"/>
+    <xacro:property name="wheel_offset_y" value="0.105"/> <!-- Offset is slightly lower than the wheel center to account for wheel pointof contact -->
     <xacro:property name="wheel_offset_z" value="-0.031"/>
     <xacro:property name="caster_wheel_diameter" value="0.038"/>
     <xacro:property name="caster_wheel_mass" value="0.01"/>
@@ -19,4 +19,11 @@
     <xacro:property name="camera_width" value="0.025"/>
     <xacro:property name="camera_height" value="0.024"/>
     <xacro:property name="camera_fov_deg" value="77"/>
+
+    <xacro:property name="tof_camera_length" value="0.020" />
+    <xacro:property name="tof_camera_width" value="0.040" />
+    <xacro:property name="tof_camera_height" value="0.020" />
+    <!-- The horizontal FOV for the 100x100 mode is typically around 80-90 degrees.
+         We can calculate it from the intrinsics if needed, but 85 is a good start. -->
+    <xacro:property name="tof_camera_fov_deg" value="85.0" />
 </robot>
