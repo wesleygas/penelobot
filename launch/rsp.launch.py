@@ -14,7 +14,7 @@ def generate_launch_description():
 
     # Check if we're told to use sim time
     # To provide arguments to a launch file from de command line just use the "[param_name]:=[param_value]" syntak. No "-ros-..." needed
-    use_sim_time = LaunchConfiguration('use_sim_time')
+    use_sim_time = LaunchConfiguration('use_sim_time', default=False)
     use_ros2_control = LaunchConfiguration('use_ros2_control')
     # print(f"Using params: use_sim_time: {use_sim_time} | use_ros2_control: {use_ros2_control}")
     # Process the URDF file
