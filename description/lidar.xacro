@@ -5,7 +5,7 @@
     <joint name="laser_joint" type="fixed">
         <parent link="main_stack"/>
         <child link="laser_frame"/>
-        <origin xyz="-0.02 0 ${chassis_height+0.046}" rpy="0 0 0"/>
+        <origin xyz="-0.02 0 ${chassis_height+0.046}" rpy="${pi} 0 0"/>
     </joint>
 
     <link name="laser_frame">
