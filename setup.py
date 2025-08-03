@@ -28,7 +28,6 @@ setup(
     entry_points={
         'console_scripts': [
             'my_node = penelobot.my_node:main',
-            'dual_camera_node = penelobot.dual_camera_node:main',
             'custom_controller = penelobot.custom_controller:main'
         ],
     },

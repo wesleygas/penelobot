@@ -39,6 +39,7 @@ class CustomControllerNode(Node):
         self.base_frame = self.get_parameter('base_frame_id').value
         self.twist_topic = self.get_parameter('twist_topic').value
         self.battery_reading_period = self.get_parameter('battery_reading_period').value
+        self.loop_rate_hz = self.get_parameter('loop_rate').value
 
         # --- Protocol Constants ---
         self.START_BYTE = 0x7E
@@ -86,7 +87,6 @@ class CustomControllerNode(Node):
         self.last_battery_request_time = self.get_clock().now()
 
         # --- Main Control Loop ---
-        self.loop_rate_hz = self.get_parameter('loop_rate').value
         self.timer = self.create_timer(1.0 / self.loop_rate_hz, self.control_loop)
         self.get_logger().info("Custom controller node has been started.")
 

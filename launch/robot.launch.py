@@ -2,7 +2,7 @@ import os
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.actions import RegisterEventHandler, DeclareLaunchArgument
 from launch.event_handlers import OnProcessStart
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -20,6 +20,13 @@ def generate_launch_description():
     )
     launch_sensors = LaunchConfiguration('launch_sensors')
 
+    use_c_controller = DeclareLaunchArgument(
+        'use_c_controller',
+        default_value='true',
+        description='Set to false to use the python controller'
+    )
+    use_c_controller = LaunchConfiguration('use_c_controller')
+
     rsp = IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([
                     PathJoinSubstitution(
@@ -36,7 +43,7 @@ def generate_launch_description():
         parameters=[{
             'device_port': '/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_64:E8:33:83:BA:2C-if00',
             'baud_rate': 230400,
-            'loop_rate': 30.0,
+            'loop_rate': 60.0,
             'wheel_separation': 0.204,
             'wheel_radius': 0.033,
             'enc_counts_per_rev': 1975.0,
@@ -44,7 +51,28 @@ def generate_launch_description():
             'base_frame_id': 'base_link',
             'motor_acceleration': 9000.0,
             'battery_reading_period': 10.0
-        }]
+        }],
+        condition=UnlessCondition(use_c_controller)
+    )
+
+    custom_c_controller_node = Node(
+        package="serial_diffdrive_controller_node",
+        executable='serial_diffdrive_controller_node', 
+        name='diffdrive_controller',
+        output='screen',
+        parameters=[{
+            'device_port': '/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_64:E8:33:83:BA:2C-if00',
+            'baud_rate': 230400,
+            'loop_rate': 60.0,
+            'wheel_separation': 0.204,
+            'wheel_radius': 0.033,
+            'enc_counts_per_rev': 1975.0,
+            'odom_frame_id': 'odom',
+            'base_frame_id': 'base_link',
+            'motor_acceleration': 9000.0,
+            'battery_reading_period': 10.0
+        }],
+        condition=IfCondition(use_c_controller)
     )
 
     twist_mux_params = PathJoinSubstitution([FindPackageShare(package_name),'config','twist_mux.yaml'])
@@ -69,6 +97,7 @@ def generate_launch_description():
         rsp,
         twist_mux,
         custom_controller_node,
+        custom_c_controller_node,
         launch_sensors_arg,
         sensors_launch_include
     ])
