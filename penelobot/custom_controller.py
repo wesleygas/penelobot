@@ -4,6 +4,7 @@ from rclpy.node import Node
 import serial
 import math
 import time
+import struct
 from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import JointState, BatteryState
@@ -17,7 +18,7 @@ class CustomControllerNode(Node):
         # --- Parameters ---
         self.declare_parameter('device_port', '/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_64:E8:33:83:BA:2C-if00')
         self.declare_parameter('baud_rate', 230400)
-        self.declare_parameter('loop_rate', 30.0)
+        self.declare_parameter('loop_rate', 60.0)
         self.declare_parameter('wheel_separation', 0.210)
         self.declare_parameter('wheel_radius', 0.034)
         self.declare_parameter('enc_counts_per_rev', 1975.0)
@@ -38,13 +39,22 @@ class CustomControllerNode(Node):
         self.base_frame = self.get_parameter('base_frame_id').value
         self.twist_topic = self.get_parameter('twist_topic').value
         self.battery_reading_period = self.get_parameter('battery_reading_period').value
-        
+
+        # --- Protocol Constants ---
+        self.START_BYTE = 0x7E
+        self.CMD_SET_SPEEDS = 0x01
+        # self.CMD_GET_ODOMETRY = 0x02 # Obsolete
+        self.CMD_ODOMETRY_DATA = 0x03
+        self.CMD_GET_BATTERY = 0x04
+        self.CMD_BATTERY_DATA = 0x05
+        self.CMD_RESET_ENCODERS = 0x06
+        self.CMD_SET_ACCEL = 0x07
+        self.CMD_SET_TELEMETRY_RATE = 0x08 # New command
+
+        # (Conversion factors, publishers, subscribers are unchanged)
         # --- Conversion Factors ---
-        # Used for odometry calculation
         self.ticks_per_meter = self.enc_cpr / (2 * math.pi * self.wheel_radius)
-        # Used for joint_state position
         self.rads_per_tick = (2 * math.pi) / self.enc_cpr
-        # Used to convert rad/s commands to ticks/s for the MCU
         self.ticks_per_rad = self.enc_cpr / (2 * math.pi)
 
         # --- Publishers and Subscribers ---
@@ -53,19 +63,19 @@ class CustomControllerNode(Node):
         self.battery_pub = self.create_publisher(BatteryState, 'battery_state', 10)
         self.tf_broadcaster = TransformBroadcaster(self)
         self.create_subscription(Twist, self.twist_topic, self.cmd_vel_callback, 10)
-
+        
         # --- Serial Communication ---
         try:
-            self.serial_conn = serial.Serial(self.port, self.baud, timeout=0.1, write_timeout=0.1)
+            self.serial_conn = serial.Serial(self.port, self.baud, timeout=0.05)
             self.get_logger().info(f"Successfully connected to {self.port}")
-            time.sleep(2) # Wait for the MCU to be ready
+            time.sleep(2)
             self.initialize_mcu()
         except serial.SerialException as e:
             self.get_logger().error(f"Failed to connect to {self.port}: {e}")
             rclpy.shutdown()
             return
 
-        # --- State Variables ---
+        # (State variables are unchanged)
         self.latest_twist = Twist()
         self.last_time = self.get_clock().now()
         self.last_left_ticks = None
@@ -73,101 +83,118 @@ class CustomControllerNode(Node):
         self.x_pos = 0.0
         self.y_pos = 0.0
         self.theta = 0.0
-        self.read_battery_flag = self.battery_reading_period > 0
+        self.last_battery_request_time = self.get_clock().now()
 
         # --- Main Control Loop ---
-        loop_rate_hz = self.get_parameter('loop_rate').value
-        self.timer = self.create_timer(1.0 / loop_rate_hz, self.control_loop)
-        if(self.battery_reading_period > 0):
-            self.battery_timer = self.create_timer(self.battery_reading_period, self.schedule_battery_read)
+        self.loop_rate_hz = self.get_parameter('loop_rate').value
+        self.timer = self.create_timer(1.0 / self.loop_rate_hz, self.control_loop)
         self.get_logger().info("Custom controller node has been started.")
-        
+
+    def send_packet(self, command_id, payload=b''):
+        # (This function is unchanged)
+        payload_len = 2 + len(payload)
+        checksum_data = bytearray([command_id]) + payload
+        checksum = sum(checksum_data) & 0xFF
+        packet = bytearray([self.START_BYTE, payload_len, command_id]) + payload + bytearray([checksum])
+        try:
+            self.serial_conn.write(packet)
+        except serial.SerialException as e:
+            self.get_logger().error(f"Error writing to serial port: {e}")
+
     def initialize_mcu(self):
-        """Send initialization commands to the MCU."""
+        """Send initialization commands to the MCU using the new protocol."""
         self.get_logger().info("Initializing MCU...")
         # Reset encoders
-        self.serial_conn.write(b'r\r\n')
-        self.get_logger().info(f"MCU response to 'r': {self.serial_conn.readline().decode().strip()}")
+        self.send_packet(self.CMD_RESET_ENCODERS)
+        time.sleep(0.1)
         # Set acceleration
-        accel_cmd = f"o {int(self.motor_accel)}\r\n"
-        self.serial_conn.write(accel_cmd.encode())
-        self.get_logger().info("MCU acceleration set.")
+        accel_payload = struct.pack('<I', int(self.motor_accel))
+        self.send_packet(self.CMD_SET_ACCEL, accel_payload)
+        time.sleep(0.1)
+        # --- ADDED: Set telemetry streaming rate ---
+        self.get_logger().info(f"Setting telemetry rate to {self.loop_rate_hz} Hz.")
+        # '<H' is unsigned 16-bit int
+        telemetry_payload = struct.pack('<H', int(self.loop_rate_hz))
+        self.send_packet(self.CMD_SET_TELEMETRY_RATE, telemetry_payload)
+        
         self.get_logger().info("MCU Initialized.")
-
 
     def cmd_vel_callback(self, msg):
         self.latest_twist = msg
-        
-    def schedule_battery_read(self):
-        self.read_battery_flag = True
 
     def control_loop(self):
-        # 1. --- INVERSE KINEMATICS ---
-        # Calculate target wheel velocities in rad/s from Twist command
+        # 1. --- SEND MOTOR COMMANDS ---
         linear_x = self.latest_twist.linear.x
         angular_z = self.latest_twist.angular.z
-
         v_right_rads = (linear_x + (angular_z * self.wheel_separation / 2.0)) / self.wheel_radius
         v_left_rads = (linear_x - (angular_z * self.wheel_separation / 2.0)) / self.wheel_radius
-
-        # 2. --- CONVERT & SEND MOTOR COMMANDS ---
-        # Convert rad/s to the ticks/s that the MCU expects
         v_right_ticks = int(v_right_rads * self.ticks_per_rad)
         v_left_ticks = int(v_left_rads * self.ticks_per_rad)
-        
-        # Format the command string: 'm <left_ticks/s> <right_ticks/s>\r\n'
-        motor_cmd = f"m {v_left_ticks} {v_right_ticks}\r\n"
+        speed_payload = struct.pack('<hh', v_left_ticks, v_right_ticks)
+        self.send_packet(self.CMD_SET_SPEEDS, speed_payload)
 
-        try:
-            # Send motor command and read the "OK" confirmation
-            self.serial_conn.write(motor_cmd.encode())
-            self.serial_conn.readline() # Read and discard the "OK"
+        # 2. --- REQUEST OTHER TELEMETRY (infrequent data) ---
+        # self.send_packet(self.CMD_GET_ODOMETRY) # <-- REMOVED
+        now = self.get_clock().now()
+        if (now - self.last_battery_request_time).nanoseconds / 1e9 > self.battery_reading_period:
+            self.send_packet(self.CMD_GET_BATTERY)
+            self.last_battery_request_time = now
 
-            # 3. --- REQUEST AND READ ENCODER FEEDBACK ---
-            self.serial_conn.write(b'e\r\n')
-            encoder_line = self.serial_conn.readline().decode('utf-8').strip()
-            odom_stamp = self.get_clock().now()
+        # 3. --- READ AND PROCESS INCOMING DATA ---
+        self.read_and_process_serial()
 
-            # Parse the encoder response "left_ticks right_ticks"
-            parts = encoder_line.split()
-            if len(parts) == 2:
-                current_left_ticks = int(parts[0])
-                current_right_ticks = int(parts[1])
-                # If parsing is successful, process odometry
-                self.process_odometry(odom_stamp, current_left_ticks, current_right_ticks)
-                # self.get_logger().info(f"Encoder data: left={current_left_ticks}, right={current_right_ticks}")
-            else:
-                self.get_logger().warn(f"Unexpected encoder data: '{encoder_line}'.")
-                self.serial_conn.reset_input_buffer()
-            
-            if(self.read_battery_flag):
-                self.read_battery_flag = False
-                self.serial_conn.write(b'v\r\n')
-                voltage_line = self.serial_conn.readline().decode('utf-8').strip()
-                if(voltage_line.startswith('v')):
-                    voltage = float(voltage_line[1:])
-                    self.process_battery_voltage(voltage)
+    # The functions read_and_process_serial, handle_packet, process_odometry,
+    # and all the publishing functions remain EXACTLY THE SAME.
+    # I'm omitting them for brevity.
+    # ... (paste your existing helper functions here) ...
+    def read_and_process_serial(self):
+        """Reads all available packets from the serial buffer and processes them."""
+        while self.serial_conn.in_waiting > 0:
+            if self.serial_conn.read(1) == bytes([self.START_BYTE]):
+                packet_len_byte = self.serial_conn.read(1)
+                if not packet_len_byte: continue
+                packet_len = packet_len_byte[0]
+
+                packet_data = self.serial_conn.read(packet_len)
+                if len(packet_data) != packet_len:
+                    self.get_logger().warn("Incomplete packet received.")
+                    continue
+
+                received_checksum = packet_data[-1]
+                calculated_checksum = sum(packet_data[:-1]) & 0xFF
+                
+                if received_checksum == calculated_checksum:
+                    cmd_id = packet_data[0]
+                    payload = packet_data[1:-1]
+                    self.handle_packet(cmd_id, payload)
                 else:
-                    self.get_logger().warn(f"Unexpected battery voltage data: '{voltage_line}'.")
-                    self.serial_conn.flush()
-        except (serial.SerialException, serial.SerialTimeoutException) as e:
-            self.get_logger().error(f"Serial communication error: {e}")
-        except (ValueError, IndexError) as e:
-            self.get_logger().error(f"Error parsing encoder data: {e}")
-        except Exception as e:
-            self.get_logger().error(f"An unexpected error occurred in control_loop: {e}")
+                    self.get_logger().warn("Checksum mismatch, discarding packet.")
 
+    def handle_packet(self, cmd_id, payload):
+        """Dispatches packets to the correct handler based on command ID."""
+        if cmd_id == self.CMD_ODOMETRY_DATA:
+            try:
+                odom_stamp = self.get_clock().now()
+                left_ticks, right_ticks = struct.unpack('<ii', payload)
+                self.process_odometry(odom_stamp, left_ticks, right_ticks)
+            except struct.error:
+                self.get_logger().warn("Malformed odometry packet.")
+        
+        elif cmd_id == self.CMD_BATTERY_DATA:
+            try:
+                voltage, = struct.unpack('<f', payload)
+                self.process_battery_voltage(voltage)
+            except struct.error:
+                self.get_logger().warn("Malformed battery packet.")
 
     def process_battery_voltage(self, voltage):
         battery_msg = BatteryState()
         battery_msg.header.stamp = self.get_clock().now().to_msg()
         battery_msg.voltage = voltage
-        battery_msg.present = True # This means a battery is connected
-        # Set other fields to "unknown" or "not applicable" as we don't have that data
+        battery_msg.present = True
         battery_msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_UNKNOWN
         battery_msg.power_supply_health = BatteryState.POWER_SUPPLY_HEALTH_UNKNOWN
         battery_msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_UNKNOWN
-        # Use NaN for values we can't measure
         battery_msg.current = float('nan')
         battery_msg.charge = float('nan')
         battery_msg.percentage = float('nan')
@@ -182,7 +209,7 @@ class CustomControllerNode(Node):
             return
 
         # Handle the very first reading
-        if self.last_left_ticks is None and self.last_right_ticks is None:
+        if self.last_left_ticks is None or self.last_right_ticks is None:
                 self.last_left_ticks = left_ticks
                 self.last_right_ticks = right_ticks
                 self.last_time = current_time
@@ -258,15 +285,10 @@ class CustomControllerNode(Node):
         self.odom_pub.publish(odom_msg)
 
     def publish_tf(self, stamp):
-        """
-        Publishes the odom -> base_link transform.
-        """
         t = TransformStamped()
         t.header.stamp = stamp.to_msg()
         t.header.frame_id = self.odom_frame
         t.child_frame_id = self.base_frame
-        
-        # Set the translation
         t.transform.translation.x = self.x_pos
         t.transform.translation.y = self.y_pos
         t.transform.translation.z = 0.0
@@ -317,8 +339,8 @@ def main(args=None):
     finally:
         # Stop the robot before shutting down
         node.get_logger().info("Stopping robot...")
-        stop_cmd = "m 0 0\r\n"
-        node.serial_conn.write(stop_cmd.encode())
+        stop_payload = struct.pack('<hh', 0, 0)
+        node.send_packet(node.CMD_SET_SPEEDS, stop_payload)
         node.serial_conn.close()
         node.destroy_node()
         rclpy.shutdown()
